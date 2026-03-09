@@ -1,0 +1,48 @@
+{
+  "expo": {
+    "name": "RxRO Driver",
+    "slug": "driver-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#111827"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.rxro.driver",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Location is used to track your delivery position in real-time.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Location is used to track your delivery position even when the app is in the background.",
+        "NSCameraUsageDescription": "Camera is used to scan package barcodes and capture proof of delivery.",
+        "NSPhotoLibraryUsageDescription": "Photo library is used to attach proof of delivery photos."
+      },
+      "backgroundColor": "#111827"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#111827"
+      },
+      "package": "com.rxro.driver",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE"
+      ]
+    },
+    "plugins": [
+      "expo-location",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Driver App to access camera for barcode scanning and proof of delivery photos."
+        }
+      ],
+      "expo-image-picker",
+      "expo-secure-store"
+    ]
+  }
+}

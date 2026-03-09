@@ -1,0 +1,137 @@
+import 'react-native-gesture-handler';
+import React, { useEffect, useState } from 'react';
+import { StatusBar } from 'expo-status-bar';
+import { View, ActivityIndicator } from 'react-native';
+import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { getSession, logoutDriver, getBaseUrl, fetchDriverName, SessionUser } from './src/services/api';
+import { startAutoSync } from './src/services/proofSyncService';
+import LoginScreen from './src/screens/LoginScreen';
+import RouteListScreen from './src/screens/RouteListScreen';
+import RouteDetailScreen from './src/screens/RouteDetailScreen';
+import DeliveryCompleteScreen from './src/screens/DeliveryCompleteScreen';
+import type { Route, RouteStop } from './src/types';
+
+const queryClient = new QueryClient();
+
+const DarkTheme = {
+  ...DefaultTheme,
+  colors: {
+    ...DefaultTheme.colors,
+    background: '#111827',
+    card: '#1F2937',
+    text: '#F9FAFB',
+    border: '#374151',
+    primary: '#3B82F6',
+    notification: '#EF4444',
+  },
+};
+
+type AuthedUser = SessionUser & { driverName: string };
+
+type AppScreen =
+  | { name: 'loading' }
+  | { name: 'login' }
+  | { name: 'routes'; user: AuthedUser }
+  | { name: 'detail'; route: Route; user: AuthedUser }
+  | { name: 'complete'; stop: RouteStop; route: Route; user: AuthedUser };
+
+async function resolveDriverName(user: SessionUser): Promise<AuthedUser> {
+  // Session may or may not include driverName — fetch it if missing
+  const name = user.driverName ?? await fetchDriverName(user.driverId);
+  return { ...user, driverName: name };
+}
+
+export default function App() {
+  const [screen, setScreen] = useState<AppScreen>({ name: 'loading' });
+
+  useEffect(() => {
+    startAutoSync();
+    (async () => {
+      try {
+        const url = await getBaseUrl();
+        if (!url) { setScreen({ name: 'login' }); return; }
+
+        const sessionUser = await getSession();
+        if (sessionUser?.role === 'driver') {
+          const user = await resolveDriverName(sessionUser);
+          setScreen({ name: 'routes', user });
+        } else {
+          setScreen({ name: 'login' });
+        }
+      } catch {
+        setScreen({ name: 'login' });
+      }
+    })();
+  }, []);
+
+  async function handleLoggedIn(sessionUser: SessionUser) {
+    const user = await resolveDriverName(sessionUser);
+    setScreen({ name: 'routes', user });
+  }
+
+  async function handleLogout() {
+    try { await logoutDriver(); } catch {}
+    queryClient.clear();
+    setScreen({ name: 'login' });
+  }
+
+  if (screen.name === 'loading') {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#111827', alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator color="#3B82F6" size="large" />
+      </View>
+    );
+  }
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      <SafeAreaProvider>
+        <NavigationContainer theme={DarkTheme} independent>
+          <StatusBar style="light" />
+
+          {screen.name === 'login' && (
+            <LoginScreen onLoggedIn={handleLoggedIn} />
+          )}
+
+          {screen.name === 'routes' && (
+            <RouteListScreen
+              driverId={screen.user.driverId}
+              driverName={screen.user.driverName}
+              onSelectRoute={(route) =>
+                setScreen({ name: 'detail', route, user: screen.user })
+              }
+              onLogout={handleLogout}
+            />
+          )}
+
+          {screen.name === 'detail' && (
+            <RouteDetailScreen
+              route={screen.route}
+              driverId={screen.user.driverId}
+              onBack={() => setScreen({ name: 'routes', user: screen.user })}
+              onSelectStop={(stop, route) =>
+                setScreen({ name: 'complete', stop, route, user: screen.user })
+              }
+            />
+          )}
+
+          {screen.name === 'complete' && (
+            <DeliveryCompleteScreen
+              stop={screen.stop}
+              route={screen.route}
+              onBack={() =>
+                setScreen({ name: 'detail', route: screen.route, user: screen.user })
+              }
+              onCompleted={() =>
+                setScreen({ name: 'detail', route: screen.route, user: screen.user })
+              }
+            />
+          )}
+
+        </NavigationContainer>
+      </SafeAreaProvider>
+    </QueryClientProvider>
+  );
+}
