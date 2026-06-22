@@ -24,20 +24,38 @@ export async function clearSession(): Promise<void> {
 async function apiFetch<T>(
   path: string,
   options?: RequestInit,
+  timeoutMs = 10000,
 ): Promise<{ data: T; setCookie?: string }> {
   const base = await getBaseUrl();
   if (!base) throw new Error('Server URL not configured');
 
   const cookie = await getSessionCookie();
 
-  const res = await fetch(`${base}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(cookie ? { Cookie: cookie } : {}),
-      ...(options?.headers ?? {}),
-    },
-    ...options,
-  });
+  // Guard against fetch() hanging indefinitely on a slow/unreachable server.
+  // Without this, app startup (getSession/getBaseUrl) can get stuck forever,
+  // which looks identical to a frozen splash screen.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  let res: Response;
+  try {
+    res = await fetch(`${base}${path}`, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(cookie ? { Cookie: cookie } : {}),
+        ...(options?.headers ?? {}),
+      },
+      signal: controller.signal,
+      ...options,
+    });
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      throw new Error(`Request timed out after ${timeoutMs}ms: ${path}`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   // Capture session cookie from response so we can persist it
   const setCookie = res.headers.get('set-cookie') ?? undefined;

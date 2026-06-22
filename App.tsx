@@ -1,5 +1,7 @@
 import 'react-native-gesture-handler';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
+import * as SplashScreen from 'expo-splash-screen';
+import ErrorBoundary from './src/components/ErrorBoundary';
 import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator } from 'react-native';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
@@ -12,6 +14,14 @@ import RouteListScreen from './src/screens/RouteListScreen';
 import RouteDetailScreen from './src/screens/RouteDetailScreen';
 import DeliveryCompleteScreen from './src/screens/DeliveryCompleteScreen';
 import type { Route, RouteStop } from './src/types';
+
+// Keep the native splash screen visible while we load the session.
+// Without this call (and the matching hideAsync() below), SDK 53+ may
+// never automatically dismiss the splash screen, leaving a permanently
+// blank/black screen even though the app underneath is working fine.
+SplashScreen.preventAutoHideAsync().catch(() => {
+  // No-op if it was already called or unsupported on this platform
+});
 
 const queryClient = new QueryClient();
 
@@ -38,16 +48,23 @@ type AppScreen =
   | { name: 'complete'; stop: RouteStop; route: Route; user: AuthedUser };
 
 async function resolveDriverName(user: SessionUser): Promise<AuthedUser> {
-  // Session may or may not include driverName — fetch it if missing
   const name = user.driverName ?? await fetchDriverName(user.driverId);
   return { ...user, driverName: name };
 }
 
 export default function App() {
   const [screen, setScreen] = useState<AppScreen>({ name: 'loading' });
+  const [appIsReady, setAppIsReady] = useState(false);
 
   useEffect(() => {
     startAutoSync();
+
+    // Hard safety net: no matter what happens above, never let the splash
+    // screen stay stuck for more than 8 seconds. This guarantees the app
+    // always reaches a visible screen (even if that screen then shows an
+    // error) instead of freezing on the logo forever.
+    const safetyTimer = setTimeout(() => setAppIsReady(true), 8000);
+
     (async () => {
       try {
         const url = await getBaseUrl();
@@ -62,9 +79,22 @@ export default function App() {
         }
       } catch {
         setScreen({ name: 'login' });
+      } finally {
+        clearTimeout(safetyTimer);
+        setAppIsReady(true);
       }
     })();
+
+    return () => clearTimeout(safetyTimer);
   }, []);
+
+  // Called once our first real screen has been laid out on-screen.
+  // This is what actually tells the native layer to hide the splash.
+  const onLayoutRootView = useCallback(async () => {
+    if (appIsReady) {
+      await SplashScreen.hideAsync().catch(() => {});
+    }
+  }, [appIsReady]);
 
   async function handleLoggedIn(sessionUser: SessionUser) {
     const user = await resolveDriverName(sessionUser);
@@ -77,19 +107,33 @@ export default function App() {
     setScreen({ name: 'login' });
   }
 
+  if (!appIsReady) {
+    // Still resolving session — native splash screen is still showing,
+    // so nothing needs to render here yet.
+    return null;
+  }
+
   if (screen.name === 'loading') {
     return (
-      <View style={{ flex: 1, backgroundColor: '#111827', alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator color="#3B82F6" size="large" />
-      </View>
+      <ErrorBoundary>
+        <View
+          style={{ flex: 1, backgroundColor: '#111827', alignItems: 'center', justifyContent: 'center' }}
+          onLayout={onLayoutRootView}
+        >
+          <ActivityIndicator color="#3B82F6" size="large" />
+        </View>
+      </ErrorBoundary>
     );
   }
 
   return (
+    <ErrorBoundary>
     <QueryClientProvider client={queryClient}>
       <SafeAreaProvider>
         <NavigationContainer theme={DarkTheme} independent>
           <StatusBar style="light" />
+
+          <View style={{ flex: 1 }} onLayout={onLayoutRootView}>
 
           {screen.name === 'login' && (
             <LoginScreen onLoggedIn={handleLoggedIn} />
@@ -130,8 +174,11 @@ export default function App() {
             />
           )}
 
+          </View>
+
         </NavigationContainer>
       </SafeAreaProvider>
     </QueryClientProvider>
+    </ErrorBoundary>
   );
 }
